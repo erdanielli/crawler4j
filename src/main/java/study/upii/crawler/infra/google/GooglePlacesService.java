@@ -12,41 +12,58 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
 
 public class GooglePlacesService {
 
-    private final String apiKey;
     private final String apiUrl;
     private final ObjectMapper objectMapper;
 
-    public GooglePlacesService(String apiKey,
-                               String apiUrl,
-                               ObjectMapper objectMapper) {
-        this.apiKey = apiKey;
+    public GooglePlacesService(String apiUrl, ObjectMapper objectMapper) {
         this.apiUrl = apiUrl;
         this.objectMapper = objectMapper;
     }
 
-    public Response search(String term, Point centralPoint, Integer radiusFromCentralPoint) throws IOException {
+    public Collection<Place> search(String term, String type) throws IOException {
+        Set<Place> results = new LinkedHashSet<>();
         try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
-            String fields = "&fields=photos,formatted_address,name,rating,opening_hours,geometry";
-            String locationBias = "&locationbias=circle:" + radiusFromCentralPoint + "@" + centralPoint;
-            String inputType = "&inputtype=textquery";
-            String uri = apiUrl + "?input=" + URLEncoder.encode(term, StandardCharsets.UTF_8) + inputType + fields + locationBias + "&key=" + apiKey;
-            HttpGet get = new HttpGet(uri);
-            CloseableHttpResponse response = httpclient.execute(get);
-            HttpEntity entity = response.getEntity();
-            return objectMapper.readValue(
-                    entity.getContent(),
-                    Response.class
-            );
+            String uri = apiUrl + "&query=" + term + "&type=" + type + "&region=br&fields=name,geometry,types";
+            Response resp = getNextPage(httpclient, uri, results::addAll);
+            int max = 5;
+            while (resp.nextPageToken != null && max-- > 0) {
+                resp = getNextPage(httpclient, apiUrl + "&pagetoken=" + resp.nextPageToken, results::addAll);
+            }
         }
-
+        return results;
     }
 
+    private Response getNextPage(CloseableHttpClient client, String uri, Consumer<List<Place>> placesCn) throws IOException {
+        System.out.println("Fetching " + uri);
+        int maxRetries = 5;
+        while (maxRetries-- > 0) {
+            try (CloseableHttpResponse response = client.execute(new HttpGet(uri))) {
+                HttpEntity entity = response.getEntity();
+                Response resp = objectMapper.readValue(entity.getContent(), Response.class);
+                if (resp.getStatus().equals("OK")) {
+                    placesCn.accept(resp.getResults());
+                    System.out.println(resp.getResults().size() + " places loaded");
+                    return resp;
+                } else {
+                    System.out.println("STATUS: " + resp.getStatus());
+                    System.out.println("Retrying in 1s....");
+                    Thread.sleep(1000L);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }
+        throw new IllegalStateException("TIMEOUT REACHED");
+    }
 
     @Getter
     @Setter
@@ -54,11 +71,11 @@ public class GooglePlacesService {
         @JsonProperty("next_page_token")
         private String nextPageToken;
         private List<Place> results;
-        @JsonProperty("debug_log")
-        private List<String> debugLog;
+        //        @JsonProperty("debug_log")
+//        private List<String> debugLog;
         private String status;
-        @JsonProperty("info_messages")
-        private List<String> infoMessages;
+//        @JsonProperty("info_messages")
+//        private List<String> infoMessages;
     }
 
     @Getter
@@ -68,19 +85,40 @@ public class GooglePlacesService {
         private String id;
         @JsonProperty("business_status")
         private String status;
-        @JsonProperty("formatted_address")
-        private String address;
+//        @JsonProperty("formatted_address")
+//        private String address;
         private Geometry geometry;
         private String name;
-        private List<Photo> photos;
-        @JsonProperty("opening_hours")
-        private OpeningHours openingHours;
-        private Float rating;
-        @JsonProperty("user_ratings_total")
-        private Float userRatingsTotal;
+//        private List<Photo> photos;
+//        @JsonProperty("opening_hours")
+//        private OpeningHours openingHours;
+//        private Float rating;
+//        @JsonProperty("user_ratings_total")
+//        private Float userRatingsTotal;
         private List<String> types;
-        @JsonProperty("plus_code")
-        private PlusCode plusCode;
+//        @JsonProperty("plus_code")
+//        private PlusCode plusCode;
+
+        @Override
+        public int hashCode() {
+            return id.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Place place = (Place) o;
+            return id.equals(place.id);
+        }
+
+        @Override
+        public String toString() {
+            return "{name=" + name
+                    + ",location=" + geometry.getLocation()
+                    + ",types=[" + String.join(",", types) + "]"
+                    + ",id=" + id + '}';
+        }
     }
 
     @Getter
@@ -101,16 +139,19 @@ public class GooglePlacesService {
     @Setter
     public static class Geometry {
         private Point location;
-        private Viewport viewport;
+//        private Viewport viewport;
     }
 
+/*
     @Getter
     @Setter
     public static class Viewport {
         private Point northeast;
         private Point southwest;
     }
+*/
 
+/*
     @Getter
     @Setter
     public static class Photo {
@@ -121,7 +162,9 @@ public class GooglePlacesService {
         @JsonProperty("photo_reference")
         private String reference;
     }
+*/
 
+/*
     @Getter
     @Setter
     public static class OpeningHours {
@@ -130,7 +173,9 @@ public class GooglePlacesService {
         @JsonProperty("weekday_text")
         private List<String> weekdayText;
     }
+*/
 
+/*
     @Getter
     @Setter
     public static class PlusCode {
@@ -139,5 +184,6 @@ public class GooglePlacesService {
         @JsonProperty("global_code")
         private String globalCode;
     }
+*/
 
 }
